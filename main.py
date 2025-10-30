@@ -73,7 +73,7 @@ async def login(user: Login):
     last_failed = existing_user['last_failed_login']
 
     if failed_attempts >= 3 and last_failed is not None:
-        block_duration = timedelta(minutes=1)
+        block_duration = timedelta(minutes=10)
         time_passed = datetime.now() - last_failed
 
         if time_passed < block_duration:
@@ -123,7 +123,7 @@ async def recuperar_senha(recovery_data: PasswordRecovery):
 
     query = "SELECT * FROM users WHERE email = %s AND doc_number = %s"
     db_user = fetch_one(query, (recovery_data.email, recovery_data.document))
-    if not recovery_data:
+    if not db_user:
         return HTTPException(
             status_code=404,
             detail="Usuário não encontrado."
@@ -133,8 +133,8 @@ async def recuperar_senha(recovery_data: PasswordRecovery):
     update_query = "UPDATE users SET password = %s WHERE id = %s"
     execute_query(update_query, (new_password_, db_user['id']))
 
-    toke = generate_token(recovery_data.email, recovery_data.document)
-    return {"token": toke, "new_password": new_password_}
+    token = generate_token(recovery_data.email, recovery_data.document)
+    return {"token": token, "message": "Senha atualizada com sucesso."}
 
 @app.get("/api/v1/auth/me")
 async def get_me(request: Request):
