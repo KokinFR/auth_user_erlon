@@ -1,11 +1,11 @@
 from fastapi import FastAPI
 from fastapi import Request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta 
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from database import fetch_one, execute_query
-from models import User, Token, PasswordRecovery, Login
-from auth_utils import generate_token, verify_token
+from models import User, PasswordRecovery, Login
+from auth_utils import generate_token
 from middleware import AuthMiddleware
 from fastapi import HTTPException
 import psycopg2
@@ -14,6 +14,10 @@ app = FastAPI(
     title="Auth API",
     version="1.0.0",
 )
+
+throttle_cache = {}
+THROTTLE_LIMIT = 5
+THROTTLE_WINDOW = timedelta(minutes=2)
 
 app.add_middleware(
     CORSMiddleware,
@@ -142,6 +146,38 @@ async def get_me(request: Request):
     RF05
     """
     user = request.state.user
+
+    user_email = user['email']
+
+    current_time = datetime.now()
+
+    if user_email not in throttle_cache:
+        throttle_cache[user_email] = {
+            "count": 1 ,
+            "first_request_time": current_time
+        }
+    else:
+        cache_entry =throttle_cache[user_email]
+        first_request_time = cache_entry["first_request_time"]
+
+        time_passed = current_time - first_request_time
+
+        if time_passed > THROTTLE_WINDOW:
+            throttle_cache[user_email] = {
+                "count": 1,
+                "first_request_time": current_time
+            }
+
+        else:
+            if cache_entry["count"] >= THROTTLE_LIMIT:
+                time_remainging = (THROTTLE_WINDOW - time_passed).seconds
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Limite de requesições excedido. Tente novamente em {time_remainging} segundos."
+                )
+            else:
+                cache_entry["count"] += 1
+
     return {
         "id": user["id"],
         "email": user["email"],

@@ -1,15 +1,15 @@
 import base64
 from database import fetch_one
+from crypt_user import decript_token, encrypt_token
 
 
 def generate_token(email: str, doc_number: str) -> str:
     """
-    gera um token simples em base64
+    gera um token simples em cript
     """
     data_string = f"{email}:{doc_number}"
-    data_bytes = data_string.encode('utf-8')
-    token =  base64.b64encode(data_bytes).decode('utf-8')
-    return f"SDWork {token}"
+    token_data = encrypt_token(data_string)
+    return f"SDWork {token_data}"
 
 def verify_token(token: str):
     """
@@ -19,11 +19,14 @@ def verify_token(token: str):
     if not token or not token.startswith("SDWork "):
         return None
     
-    token = token.split(" ")[1]
+    token_decript = token.split(" ")[1]
+    
     try:
-        decoded_bytes = base64.b64decode(token.encode('utf-8'))
-        decoded_string = decoded_bytes.decode('utf-8')
-        email, doc_number = decoded_string.split(":")
+        decript_strings = decript_token(token_decript)
+        
+        if not decript_strings:
+            return None
+        email, doc_number, = decript_strings.split(":") 
     except Exception:
         return None
     

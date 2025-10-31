@@ -7,10 +7,6 @@ class User(BaseModel):
     username: str
     fullname: str
 
-class Token(BaseModel):
-    id_user: int
-    token: str
-
 class PasswordRecovery(BaseModel):
     email: str
     document: str = Field(..., alias="document")
