@@ -7,6 +7,7 @@ PUBLIC_PATHS = [
     "/api/v1/auth/signup",
     "/api/v1/auth/login",
     "/api/v1/auth/recuperar-senha",
+    "/api/v1/auth/recuperar-senha-conf",
     "/docs",
     "/openapi.json"
 ]

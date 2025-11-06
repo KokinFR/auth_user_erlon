@@ -1,19 +1,35 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi import Request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta 
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from database import fetch_one, execute_query
-from models import User, Token, PasswordRecovery, Login
-from auth_utils import generate_token, verify_token
+from models import User, PasswordResetResq, Login, PasswordConfirm
+from auth_utils import generate_token
 from middleware import AuthMiddleware
 from fastapi import HTTPException
 import psycopg2
+import secrets
+import redis.asyncio as redis
+from fastapi_limiter import FastAPILimiter
+from fastapi_limiter.depends import RateLimiter
 
 app = FastAPI(
     title="Auth API",
     version="1.0.0",
 )
+
+@app.on_event("startup")
+async def startup():
+    """
+    Inicializando o redis
+    """
+    try:
+        redis_connect = redis.from_url("redis://localhost:6379", encoding="utf-8", decode_responses=True)
+        await FastAPILimiter.init(redis_connect)
+        print("FastApiLIMITE conectado com redis com sucesso")
+    except Exception as e:
+        print(f"ERRO: Não foi possível conectar ao Redis para o Rate Limiter: {e}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,7 +41,7 @@ app.add_middleware(
 
 app.add_middleware(AuthMiddleware)
 
-@app.post("/api/v1/auth/signup")
+@app.post("/api/v1/auth/signup", dependencies=[Depends(RateLimiter(times=20, hours=1))])
 async def signup(user: User):
     """
     RF01
@@ -56,7 +72,7 @@ async def signup(user: User):
     token = generate_token(user.email, user.doc_number)
     return {"token": token, "user_id": user_id}
 
-@app.post("/api/v1/auth/login")
+@app.post("/api/v1/auth/login", dependencies=[Depends(RateLimiter(times=10, minutes=5))])
 async def login(user: Login):
     """
     RF02
@@ -116,32 +132,65 @@ async def logout(request: Request):
     )
 
 @app.post("/api/v1/auth/recuperar-senha")
-async def recuperar_senha(recovery_data: PasswordRecovery):
+async def recuperar_senha(request_data: PasswordResetResq):
     """
-    RF03
+    RF03 - Solicitar a redifinição da senha.
+    """
+    query = "SELECT * FROM users WHERE email = %s OR doc_number = %s"
+    user = fetch_one(query, (request_data.email, request_data.document))
+
+    success_message = {"message": "Se este e-mail estiver cadastrado, instruções de recuperação serão enviadas."}
+
+    if user:
+        token_user = secrets.token_urlsafe(32)
+        expires_at = datetime.now() + timedelta(minutes=30)
+
+        insert_token = """INSERT INTO password_reset_tokens (user_id, token, expires_at, used) VALUES (%s, %s, %s, %s)"""
+
+        try:
+            execute_query("UPDATE password_reset_tokens SET used = TRUE WHERE user_id = %s", (user['id'],))
+            execute_query(insert_token, (user['id'], token_user, expires_at, False))
+        except Exception as e:
+            print(f"Erro ao salvar token de reset: {e}")
+            raise HTTPException(status_code=500, detail="Erro ao processar solicitação.")
+        
+        #await send_password_reset_email_simulation(user['email'], token_para_usuario)
+
+    return success_message
+
+
+@app.post("/api/v1/auth/recuperar-senha-conf", dependencies=[Depends(RateLimiter(times=10, minutes=15))])
+async def recuperar_senha_confir(confirm_date: PasswordConfirm):
+    """
+    RF03 - Confirmar a recuperação de senha
     """
 
-    query = "SELECT * FROM users WHERE email = %s AND doc_number = %s"
-    db_user = fetch_one(query, (recovery_data.email, recovery_data.document))
-    if not db_user:
-        return HTTPException(
-            status_code=404,
-            detail="Usuário não encontrado."
-        )
+    token_query = """SELECT * FROM password_reset_tokens WHERE token = %s AND used = FALSE AND expires_at > %s"""
+
+    token_data = fetch_one(token_query, (confirm_date.token, datetime.now()))
+
+    if not token_data:
+        raise HTTPException(status_code=400, detail="Token invalido.")
     
-    new_password_ = recovery_data.new_password
-    update_query = "UPDATE users SET password = %s WHERE id = %s"
-    execute_query(update_query, (new_password_, db_user['id']))
+    used_id = token_data['user_id']
+    new_password = confirm_date.new_password
+     
+    update_query = "UPDATE users SET password = %s, failed_login_attempts = 0, last_failed_login = NULL WHERE id = %s"
+    execute_query(update_query, (new_password, used_id))
 
-    token = generate_token(recovery_data.email, recovery_data.document)
-    return {"token": token, "message": "Senha atualizada com sucesso."}
+    invalidate_token_query = "UPDATE password_reset_tokens SET used = TRUE WHERE id = %s"
+    execute_query(invalidate_token_query, (token_data['id'],))
 
-@app.get("/api/v1/auth/me")
+    return {"message": "Senha atualizada com sucesso."}
+
+
+@app.get("/api/v1/auth/me", dependencies=[Depends(RateLimiter(times=15, minutes=1))])
 async def get_me(request: Request):
     """
     RF05
     """
     user = request.state.user
+
     return {
         "id": user["id"],
         "email": user["email"],

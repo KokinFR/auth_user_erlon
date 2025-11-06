@@ -7,17 +7,18 @@ class User(BaseModel):
     username: str
     fullname: str
 
-class Token(BaseModel):
-    id_user: int
-    token: str
 
-class PasswordRecovery(BaseModel):
+
+class PasswordResetResq(BaseModel):
     email: str
     document: str = Field(..., alias="document")
-    new_password: str
 
     class Config:
         allow_population_by_field_name = True
+
+class PasswordConfirm(BaseModel):
+    token: str
+    new_password: str
 
 class Login(BaseModel):
     login: str = Field(..., alias="login")

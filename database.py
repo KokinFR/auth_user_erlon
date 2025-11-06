@@ -41,6 +41,17 @@ def init_db():
                     last_failed_login TIMESTAMP DEFAULT NULL
                 )
             ''')
+
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                    id SERIAL PRIMARY KEY, 
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    token Text NOT NULL UNIQUE,
+                    expires_at TIMESTAMP NOT NULL,
+                    used BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP         
+                )
+            ''')
         conn.commit()
 
 def fetch_one(query, params):
